@@ -1,4 +1,4 @@
-# NormativeDistribution
+# Distribution-valued normative modeling
 
 Normative modelling of distributions using **Wasserstein Quantile PCA
 (W-qPCA)** and GAMLSS. W-qPCA represents each distribution through its quantile
