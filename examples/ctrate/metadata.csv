@@ -1,0 +1,6 @@
+id,age,sex,KVP,manufacturer,site
+ctrate_01,66.0,M,100.0,SIEMENS,CT-RATE
+ctrate_02,24.0,M,100.0,PHILIPS,CT-RATE
+ctrate_03,33.0,F,100.0,PHILIPS,CT-RATE
+ctrate_04,29.0,M,120.0,PHILIPS,CT-RATE
+ctrate_05,25.0,M,100.0,SIEMENS,CT-RATE

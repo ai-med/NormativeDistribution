@@ -1,0 +1,6 @@
+id,age,sex,KVP,manufacturer,site
+inspect_01,49.5,M,120.0,TOSHIBA,INSPECT
+inspect_02,75.6,F,80.0,GE,INSPECT
+inspect_03,79.0,M,120.0,GE,INSPECT
+inspect_04,32.8,M,100.0,SIEMENS,INSPECT
+inspect_05,43.0,M,100.0,SIEMENS,INSPECT
