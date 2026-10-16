@@ -1,9 +1,16 @@
-# Lung histogram normative modelling
+# NormativeDistribution
 
-A compact inference and fitting prototype accompanying the article. It includes
-the fitted CT-RATE+TUM noncontrast and INSPECT+TUM contrast-enhanced lung models,
-and five held-out examples from each source cohort. It demonstrates the method;
-it does not reproduce the article's experiments or performance estimates.
+Normative modelling of distributions using **Wasserstein Quantile PCA
+(W-qPCA)** and GAMLSS. W-qPCA represents each distribution through its quantile
+function and embeds it in a low-dimensional space. Conditional models of the
+embedding describe expected variation with demographic and acquisition
+covariates, supporting abnormality scoring and reconstruction of expected
+distributions.
+
+The approach is general and can be applied to distributions from different
+anatomical regions or measurement domains. The provided applications are
+noncontrast and contrast-enhanced lung models, with five held-out examples
+from CT-RATE and five from INSPECT.
 
 ## Install
 
@@ -19,46 +26,17 @@ Rscript -e 'install.packages(c("gamlss", "gamlss.dist"), repos="https://cloud.r-
 Run the following commands from this directory. Outputs must be new or empty
 directories; existing outputs are never silently overwritten.
 
-## Run the ten examples
+## Method
 
-```bash
-python run.py score --model models/ctrate --input examples/ctrate --output output/ctrate
-python run.py score --model models/inspect --input examples/inspect --output output/inspect
-python verify.py
-```
+Each distribution is represented by its quantiles at probabilities 0.01 through
+0.99. W-qPCA centres the quantile functions using the healthy reference mean,
+without standardizing individual quantile coordinates. On this equally spaced
+probability grid, root mean squared differences between quantile vectors
+approximate Wasserstein-2 distances between distributions. The retained components provide
+an embedding that can also be inverted to reconstruct quantile functions.
 
-Each command scores five subjects and all five lobes. Outputs are:
-
-- `component_predictions.csv`: observed PC scores, ST1 parameters, PIT, normal
-  residuals, and conditional component medians. Parameters are in the model's
-  scaled score units; `observed_score` and `median` are in original PCA units.
-- `regional_scores.csv`: R4 quadratic scores and central-grid W2 per lobe,
-  plus an indicator that the reconstructed curve required monotonic repair.
-- `subject_scores.csv`: the joint R20 quadratic score.
-- `reconstruction.npz`: conditional central quantile curves, IDs, lobe order,
-  and the probability grid.
-
-The sample quantiles were extracted from CT voxels before histogram rounding.
-To run from the supplied histograms instead:
-
-```bash
-python run.py extract --input examples/ctrate --output output/ctrate_hist_quantiles
-python run.py score --model models/ctrate --input output/ctrate_hist_quantiles --output output/ctrate_hist_scores
-```
-
-Alternatively pass `--histograms` to `score`. Binned-histogram quantiles can
-differ from the original voxel quantiles and consequently change the scores.
-Histograms use nearest-integer HU bin centres from -1024 through 1024 inclusive,
-with separate underflow/overflow counts. Extraction fails if q01 or q99 needs
-unknown tail values, rather than inventing values outside the stored range.
-
-## Method and fitted artifacts
-
-Each lobe is represented by q01 through q99. Four PCA components are fitted per
-lobe on healthy training subjects, centring the quantiles without scaling them.
-The supplied PCA means and loadings support both embedding and reconstruction.
-
-The supplied ST1 GAMLSS models use:
+ST1 GAMLSS models describe the conditional distribution of each W-qPCA
+coordinate. The supplied models use:
 
 ```text
 mu    ~ age + sex + KVP + manufacturer + site
@@ -69,40 +47,95 @@ tau   ~ 1
 
 PIT probabilities are clipped to [1e-12, 1-1e-12] before the standard-normal
 inverse CDF. Zero-centred Ledoit-Wolf covariance is estimated from five-fold
-out-of-fold healthy-training residuals. R4 uses a separately estimated 4-by-4
-covariance for each lobe. R20 uses one 20-by-20 covariance across all five lobes.
-Scores are `z.T @ precision @ z`, without subtracting an empirical residual mean.
-Despite the R4/R20 naming, these release artifacts are covariances, without
-normalizing their diagonal to one.
+out-of-fold healthy-training residuals. Abnormality scores combine these
+residuals as `z.T @ precision @ z`, without subtracting an empirical residual
+mean or normalizing the covariance diagonal to one.
 
-W2 reconstructs the four conditional ST1 medians through inverse PCA, repairs
-crossings using PAVA, then computes `sqrt(mean((observed - reconstructed)**2))`
-on the 99 central quantiles. It is an approximation over q01-q99, in HU, not a
-full-tail Wasserstein integral or the predictive histogram sampling used for
-the article's lesion-removal analyses. Medians use R's `qST1`; the research
-Python implementation used a numerical inverse-CDF grid. `VALIDATION.md`
-records the measured numerical difference.
+Expected distributions are reconstructed by mapping the conditional ST1
+coordinate medians through inverse W-qPCA. PAVA repairs crossings in the
+reconstructed quantile curves. The distributional discrepancy W2 is computed
+as `sqrt(mean((observed - reconstructed)**2))` on the 99 central quantiles.
+This approximates Wasserstein-2 distance over q01-q99 rather than integrating
+over the full probability range. Conditional medians are calculated with R's
+`qST1()`.
 
-`models/{ctrate,inspect}/` contains only:
+## Provided models and examples
 
-- `pca.npz`: population means, loadings, grid, and lobe order.
-- `gamlss.rds`: an ordinary list of coefficients, formula strings, factor levels,
-  contrasts, links, and scaling constants. These are not full `gamlss` objects.
+The repository includes two fitted applications:
+
+| Application | Model directory | Examples |
+| --- | --- | --- |
+| Noncontrast lung model | `models/ctrate/` | Five CT-RATE subjects in `examples/ctrate/` |
+| Contrast-enhanced lung model | `models/inspect/` | Five INSPECT subjects in `examples/inspect/` |
+
+Each application uses four W-qPCA components per lung lobe. R4 scores use a
+separately estimated 4-by-4 covariance for each lobe. R20 uses one 20-by-20
+covariance across all five lobes. Choose the corresponding model for each
+example set and acquisition domain.
+
+The current scripts and saved artifacts are configured for this five-region,
+four-component application. Applying the method to other regions or domains
+requires adapting the region configuration and array dimensions, then fitting
+suitable reference models.
+
+Run both example sets:
+
+```bash
+python run.py score --model models/ctrate --input examples/ctrate --output output/ctrate
+python run.py score --model models/inspect --input examples/inspect --output output/inspect
+```
+
+Each command scores five subjects and all five lobes. Outputs are:
+
+- `component_predictions.csv`: observed W-qPCA coordinates, ST1 parameters, PIT,
+  normal residuals, and conditional coordinate medians. Parameters are in the
+  model's scaled coordinate units; `observed_score` and `median` are in original
+  W-qPCA units.
+- `regional_scores.csv`: R4 quadratic scores and central-grid W2 per lobe,
+  plus an indicator that the reconstructed curve required monotonic repair.
+- `subject_scores.csv`: the joint R20 quadratic score.
+- `reconstruction.npz`: conditional central quantile curves, IDs, lobe order,
+  and the probability grid.
+
+### Starting from binned distributions
+
+The examples provide both quantile functions and binned HU distributions.
+The sample quantiles were extracted directly from CT voxels before binning.
+To derive quantiles from the supplied binned distributions instead:
+
+```bash
+python run.py extract --input examples/ctrate --output output/ctrate_binned_quantiles
+python run.py score --model models/ctrate --input output/ctrate_binned_quantiles --output output/ctrate_binned_scores
+```
+
+Alternatively pass `--histograms` to `score`. This option reads the binned
+representation stored in `histograms.npz`. Quantiles derived from bin counts
+can differ from direct voxel quantiles and consequently change the scores.
+The provided distributions use nearest-integer HU bin centres from -1024
+through 1024 inclusive, with separate underflow/overflow counts. Extraction
+fails if a requested quantile needs unknown tail values.
+
+## Fitted artifacts
+
+`models/{ctrate,inspect}/` contains:
+
+- `pca.npz`: W-qPCA population means, loadings, probability grid, and lobe order,
+  supporting both embedding and reconstruction.
+- `gamlss.rds`: a list of coefficients, formula strings, factor levels,
+  contrasts, links, and scaling constants.
 - `covariance.npz`: joint and regional covariance/precision matrices and lobe order.
 
 These files contain no individual training rows, responses, fitted values,
 residuals, training IDs, calls, or attached training environments. They are
 prediction parameters, not a formal guarantee of anonymization. Calibration
-residuals are omitted; the prototype reports raw scores, without empirical
-p-values or diagnostic thresholds. Unknown factor levels fail explicitly.
-The CT-RATE and INSPECT models are specific to their respective acquisition
-domains; choose the corresponding model for the included examples.
+residuals are omitted; the code reports raw scores, without empirical p-values
+or diagnostic thresholds. Unknown factor levels fail explicitly.
 
 ## Input format
 
 An input directory contains `metadata.csv` and `quantiles.npz`, or
-`histograms.npz` when using histogram extraction. The two examples demonstrate
-the complete schema. All NPZ arrays load with `allow_pickle=False`.
+`histograms.npz` for binned distributions. Both example sets demonstrate the
+complete schema. All NPZ arrays load with `allow_pickle=False`.
 
 `metadata.csv` has one row per scan: `id`, `age` (years), `sex`, `KVP`,
 `manufacturer`, and `site` for pooled models. Factor strings must match the
@@ -111,10 +144,10 @@ covariates required for predictions. IDs are new example labels; no source-ID
 mapping, scan paths, patient IDs, dates, or disease labels are included.
 These are real patient-derived distributions and covariates, not synthetic
 or guaranteed anonymous records. Both example sets come from held-out
-`normal_test` subjects, not the fitting data. They are not representative
-evaluation cohorts and should not be used to estimate clinical performance.
+`normal_test` subjects. They are not representative evaluation cohorts and
+should not be used to estimate clinical performance.
 
-Arrays have this fixed lobe order:
+The supplied application uses this fixed region order:
 
 ```text
 left_upper_lobe, left_lower_lobe, right_upper_lobe,
@@ -130,10 +163,10 @@ integer tail counts). Array IDs must match metadata row order exactly.
 
 For already aligned CT and TotalSegmentator label maps, use
 `quantiles.quantiles_from_nifti(image_path, segmentation_path, region_labels)`;
-`region_labels` maps each of the five names above to its integer label list.
+`region_labels` maps each region name to its integer label list.
 This adapter checks geometry and extracts unmodified finite voxel HU quantiles.
-No CT scans, segmentation software, or scanner-specific path discovery are
-included. The command-line `extract` operation accepts histogram inputs.
+No CT scans or segmentation software are included. The command-line `extract`
+operation accepts binned distribution inputs.
 
 ## Fit on your own reference data
 
@@ -149,31 +182,21 @@ python run.py fit --input /path/to/reference --output output/my_model
 python run.py score --model output/my_model --input /path/to/cases --output output/my_scores
 ```
 
-The fitter retains four PCs per lobe, fits full-data ST1 marginals, and refits
-them in five patient-grouped folds to estimate residual dependence. As in the
-release, the PCA basis is fixed across marginal cross-fitting. Constant factor
-terms are omitted for single-level training data; sigma uses site only when
-multiple sites are present. PCA scores are scaled by their training SD for
-numerical fitting; the saved scaling is reversed during reconstruction.
-Failed convergence or unsupported fold factor levels stop the fit explicitly.
+The supplied fitter retains four W-qPCA components per region, fits full-data
+ST1 marginals, and refits them in five patient-grouped folds to estimate
+residual dependence. The W-qPCA basis is fixed across marginal cross-fitting.
+Constant factor terms are omitted for single-level training data; sigma uses
+site only when multiple sites are present. W-qPCA coordinates are scaled by
+their training SD for numerical fitting; the saved scaling is reversed during
+reconstruction. Failed convergence or unsupported fold factor levels stop
+the fit explicitly.
+
 Fitting uses temporary private intermediates that are removed on exit. The
 resulting model directory contains parameter artifacts only. No calibration,
 hyperparameter search, cohort filtering, or disease evaluation is performed.
 
-## Code provenance and verification
+## License
 
-The implementation is reduced and adapted from the research repository:
-
-| Prototype | Research sources |
-| --- | --- |
-| `quantiles.py` | `data/quantiles/extract_region_quantiles.py` (voxel extraction); histogram rank adapter added here |
-| `qpca.py` | `data/quantiles/fit_quantile_pca.py` (training-only PCA, projection, inverse transform) |
-| `gamlss.R` | `models/gamlss/fit_quantile_pca_st1.R`, `score_tum_normative_st1.R`, and `score_staged_pooled_abdominal.R` |
-| `scores.py` | `data/audits/evaluate_tum_normative_outputs.py`, `export_pooled_final_evaluation.py`, and `evaluate_pooled_distributional.py` |
-
-The entry point and standalone input adapters are small additions. Research
-cohort management, plots, performance analyses, and private data paths have
-been removed. `verify.py` reruns the supplied examples against reference outputs;
-`VALIDATION.md` records agreement with the original release and the artifact
-content checks. Code licensing should be selected by the authors before public
-publication; no license to the underlying source datasets is implied.
+The code is licensed under the Apache License, Version 2.0; see `LICENSE`.
+This code license does not establish redistribution rights for the underlying
+source datasets or override their applicable terms.
